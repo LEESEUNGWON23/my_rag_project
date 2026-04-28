@@ -1,58 +1,55 @@
-# RAG 기반 AI 지식 검색 시스템 — 포트폴리오
+# RAG 기반 기업용 AI 어시스턴트 — 포트폴리오
 
-> 기밀 유지를 위해 회사명 및 제품명은 표기하지 않습니다.  
-> 모든 코드 스니펫은 실제 프로덕션에서 제가 작성한 코드의 일부입니다.
+> 기밀 유지를 위해 회사명 및 제품명은 표기하지 않습니다.
 
-**기간:** 2026년 3월 ~ 4월  
-**역할:** AI 백엔드 엔지니어 — RAG 파이프라인 및 LLM 백엔드 단독 개발  
-**스택:** Python · FastAPI · LangChain · Qdrant · vLLM · Docling · asyncio
+**기간:** 2026년 3월 ~ 4월 (약 2개월)  
+**역할:** AI 백엔드 엔지니어 — RAG pipeline 및 LLM serving 백엔드 단독 설계·구현·배포  
+**팀 구성:** Python 백엔드 개발자 2명 (본인 + 시니어 개발자), Spring 팀 별도
 
 ---
 
-## 시스템 개요
+## 1. Project Overview
 
-기업용 문서를 수집·임베딩하여 벡터 DB에 저장하고, 의미 기반 하이브리드 검색과 재랭킹을 거쳐 LLM 답변을 생성하는 **RAG 파이프라인을 처음부터 설계·구현**했습니다.
+사내 문서를 기반으로 질문에 답변하는 **기업용 AI 어시스턴트** 서비스의 AI 백엔드를 담당했습니다.
+
+사용자가 드라이브에 업로드한 문서(PDF, DOCX, PPTX, XLSX 등 15가지 이상 포맷)를 자동으로 파싱·embedding하고, 사용자 query가 들어오면 hybrid vector search → reranking → LLM 답변 생성 pipeline을 통해 출처가 명시된 답변을 streaming으로 제공합니다.
+
+두 개의 서비스로 구성됩니다:
+- **[api-rag →](rag/README.md)** : 문서 파싱, embedding, hybrid search, reranking
+- **[be-fastapi →](fastapi/README.md)** : 채팅 API, LLM routing, 대화 context 관리
+
+---
+
+## 2. Architecture & Tech Stack
 
 ```
-[ 문서 업로드 ]
-      │
-      ▼
-[ 파일 파싱 ] ── 15가지 이상 포맷 (LangChain / Docling)
-      │
-      ▼
-[ 임베딩 ] ── Dense + Sparse 벡터 (vLLM 원격 서빙)
-      │
-      ▼
-[ Qdrant 벡터 DB ] ── prd / dev 컬렉션 분리
-      │
-      ▼
-[ 하이브리드 검색 ] ── RRF 융합 (병렬 인코딩)
-      │
-      ▼
-[ 재랭커 ] ── vLLM 비동기 배치 병렬 처리
-      │
-      ▼
-[ LLM 답변 생성 ] ── 스트리밍 SSE / 컨텍스트 압축 / 사용자 메모리
+[ 문서 업로드 (15+ 포맷) ]
+         │
+         ▼
+  [ 파일 파싱 ]
+  LangChain Loaders ── 텍스트·코드·오피스 문서
+  Docling           ── 이미지 중심 PDF, Figma export
+         │
+         ▼
+  [ Embedding ]  Dense + Sparse 동시 생성 (vLLM 원격 serving)
+         │
+         ▼
+  [ Qdrant 벡터 DB ]  prd / dev collection 분리
+         │
+         ▼
+  [ Hybrid Search ]  Dense + Sparse → RRF fusion
+         │
+         ▼
+  [ Reranker ]  vLLM BGE-Reranker-v2-m3 (비동기 batch)
+         │
+         ▼
+  [ LLM 답변 생성 ]  SSE streaming / context 압축 / user memory
 ```
 
----
-
-## 프로젝트 구성
-
-| 저장소 | 역할 | 커밋 수 |
-|--------|------|---------|
-| [api-rag →](rag/README.md) | 문서 수집, 임베딩, 하이브리드 검색, 재랭킹 | 64+ |
-| [be-fastapi →](fastapi/README.md) | 채팅 API, LLM 라우팅, 대화 컨텍스트 관리 | 31+ |
-
----
-
-## 기술 스택
-
-| 분류 | 기술 |
-|------|------|
-| 언어 / 프레임워크 | Python 3.12, FastAPI |
-| 벡터 DB | Qdrant (Dense + Sparse 분리 컬렉션) |
-| LLM 서빙 | vLLM (임베딩, 재랭킹, 생성 모두 원격 API) |
-| 문서 파싱 | LangChain, Docling, OpenDataLoaderPDF |
-| 비동기 처리 | asyncio, aiohttp, ThreadPoolExecutor |
-| 코드 파싱 | LangChain LanguageParser (tree-sitter 기반) |
+| 기술 | 선택 이유 |
+|------|-----------|
+| **Qdrant** | Dense + Sparse vector를 단일 collection에서 관리, RRF fusion query 네이티브 지원 |
+| **vLLM (embedding·reranking)** | 로컬 GPU 점유 없이 원격 serving, FlashRank 대비 reranking 속도 18배 향상 |
+| **LangChain** | 15가지 이상 포맷을 단일 인터페이스로 통합, AST 기반 코드 chunking 지원 |
+| **Docling** | PaddleOCR(전체 페이지 이미지화)보다 빠르고 표·캡션 등 구조 정보 보존 |
+| **FastAPI + asyncio** | SSE streaming과 비동기 LLM 호출을 단일 이벤트 루프에서 처리 |
